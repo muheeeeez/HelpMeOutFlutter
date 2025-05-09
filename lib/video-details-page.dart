@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 // Define app colors
 const Color primaryColor = Color(0xFF0A2472); // Dark blue
@@ -35,6 +36,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         'Dies ist das Transkript auf Deutsch des Videos, das ein Schritt-für-Schritt-Tutorial zur effektiven Nutzung der Anwendungsfunktionen zeigt. Der Erzähler erklärt jede Funktion ausführlich mit klaren Beispielen.',
   };
 
+  // TinyURL support
+  String? _shortUrl;
+  bool _isGeneratingUrl = false;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +47,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     _initializeVideoPlayerFuture = _controller.initialize();
     _controller.setLooping(false);
     _selectedLanguage = _languages[0]; // Default to English
+
+    // Automatically generate short URL
+    _generateShortUrl();
   }
 
   @override
@@ -57,14 +65,49 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }
 
   void _copyToClipboard() {
-    Clipboard.setData(ClipboardData(text: widget.url));
+    // Update to copy the short URL if available, or fall back to original URL
+    final textToCopy = _shortUrl ?? widget.url;
+    Clipboard.setData(ClipboardData(text: textToCopy));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Video URL copied to clipboard'),
+        content: Text('Link copied to clipboard'),
         behavior: SnackBarBehavior.floating,
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  // Generate short URL using TinyURL API
+  Future<void> _generateShortUrl() async {
+    if (_isGeneratingUrl) return; // Prevent multiple concurrent calls
+
+    setState(() {
+      _isGeneratingUrl = true;
+    });
+
+    try {
+      // Make API call to TinyURL
+      final response = await http.post(
+        Uri.parse(
+          'https://tinyurl.com/api-create.php?url=${Uri.encodeComponent(widget.url)}',
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _shortUrl = response.body;
+          _isGeneratingUrl = false;
+        });
+      } else {
+        throw Exception('Failed to generate short URL');
+      }
+    } catch (e) {
+      print('Error generating short URL: $e');
+      setState(() {
+        _isGeneratingUrl = false;
+      });
+      // Don't show error snackbar as this is automatic
+    }
   }
 
   void _shareVia(String platform) {
@@ -237,39 +280,100 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
                   const SizedBox(height: 16),
 
-                  // URL display and copy
+                  // Remove original URL display and replace with only short URL section
+                  // Short URL section (now the only URL section)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: const Text(
+                      'Share Link',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            widget.url,
-                            style: TextStyle(
-                              color: Colors.grey.shade800,
-                              fontSize: 14,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.copy, color: primaryColor),
-                          onPressed: _copyToClipboard,
-                          tooltip: 'Copy URL',
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      ],
-                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child:
+                            _shortUrl != null
+                                ? Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          _shortUrl!,
+                                          style: TextStyle(
+                                            color: Colors.grey.shade800,
+                                            fontSize: 14,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: Icon(
+                                          Icons.copy,
+                                          color: primaryColor,
+                                        ),
+                                        onPressed: _copyToClipboard,
+                                        tooltip: 'Copy Link',
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                                : Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: primaryColor,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        'Generating share link...',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                      ),
+                    ],
                   ),
 
                   const SizedBox(height: 20),
