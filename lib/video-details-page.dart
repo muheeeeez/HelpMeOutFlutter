@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:assemblyai_flutter_sdk/assemblyai_flutter_sdk.dart';
+import 'dart:convert';
+import 'dart:math' as math;
 
 // Define app colors
 const Color primaryColor = Color(0xFF0A2472); // Dark blue
@@ -22,23 +25,41 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   late final VideoPlayerController _controller;
   late final Future<void> _initializeVideoPlayerFuture;
 
-  // Transcript language support
-  final List<String> _languages = ['English', 'Spanish', 'French', 'German'];
-  String? _selectedLanguage;
-  final Map<String, String> _transcripts = {
-    'English':
-        'This is the English transcript of the video showing a step-by-step tutorial about how to use the application features effectively. The narrator explains each feature in detail with clear examples.',
-    'Spanish':
-        'Este es el transcript en Español del vídeo que muestra un tutorial paso a paso sobre cómo utilizar las funciones de la aplicación de manera efectiva. El narrador explica cada función en detalle con ejemplos claros.',
-    'French':
-        'Ceci est la transcription en Français de la vidéo montrant un tutoriel étape par étape sur l\'utilisation efficace des fonctionnalités de l\'application. Le narrateur explique chaque fonctionnalité en détail avec des exemples clairs.',
-    'German':
-        'Dies ist das Transkript auf Deutsch des Videos, das ein Schritt-für-Schritt-Tutorial zur effektiven Nutzung der Anwendungsfunktionen zeigt. Der Erzähler erklärt jede Funktion ausführlich mit klaren Beispielen.',
-  };
+  // Language mapping with AssemblyAI codes
+  final List<Map<String, String>> _languageOptions = [
+    {'name': 'English', 'code': 'en'},
+    {'name': 'French', 'code': 'fr'},
+    {'name': 'Spanish', 'code': 'es'},
+    {'name': 'German', 'code': 'de'},
+    {'name': 'Italian', 'code': 'it'},
+    {'name': 'Portuguese', 'code': 'pt'},
+    {'name': 'Dutch', 'code': 'nl'},
+  ];
+
+  // Selected language code (default to English)
+  String _selectedLanguageCode = 'en';
+
+  // Get the selected language map from code
+  Map<String, String> get _selectedLanguage {
+    return _languageOptions.firstWhere(
+      (lang) => lang['code'] == _selectedLanguageCode,
+      orElse: () => {'name': 'English', 'code': 'en'},
+    );
+  }
+
+  // Cache for transcripts by language code
+  final Map<String, String> _transcripts = {};
 
   // TinyURL support
   String? _shortUrl;
   bool _isGeneratingUrl = false;
+
+  // AssemblyAI transcript state
+  String? _assemblyTranscript;
+  bool _isLoadingTranscript = false;
+  String _transcriptStatus = "Not started";
+  bool _hasTranscriptError = false;
+  String? _transcriptId;
 
   @override
   void initState() {
@@ -46,10 +67,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     _controller = VideoPlayerController.network(widget.url);
     _initializeVideoPlayerFuture = _controller.initialize();
     _controller.setLooping(false);
-    _selectedLanguage = _languages[0]; // Default to English
-
-    // Automatically generate short URL
     _generateShortUrl();
+    _fetchAssemblyTranscript(); // Fetch transcript in default language
   }
 
   @override
@@ -120,6 +139,139 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  // Add new method to fetch AssemblyAI transcript in selected language
+  Future<void> _fetchAssemblyTranscript() async {
+    setState(() {
+      _isLoadingTranscript = true;
+      _hasTranscriptError = false;
+      _transcriptStatus = "Submitting transcription...";
+    });
+
+    // If we already have a cached transcript for this language, use it
+    if (_transcripts.containsKey(_selectedLanguageCode) &&
+        _transcripts[_selectedLanguageCode]!.isNotEmpty) {
+      setState(() {
+        _assemblyTranscript = _transcripts[_selectedLanguageCode];
+        _isLoadingTranscript = false;
+        _transcriptStatus = "Completed";
+      });
+      return;
+    }
+
+    final api = AssemblyAI('1bcd183ffc084379bf81a5ed0c65e5a5');
+    try {
+      print(
+        'Submitting URL for transcription in ${_selectedLanguage['name']}: ${widget.url}',
+      );
+
+      // Debug print all the parameters we're sending
+      print(
+        'AssemblyAI parameters: {' +
+            'audio_url: ${widget.url}, ' +
+            'language_code: ${_selectedLanguageCode}, ' +
+            'punctuate: true, ' +
+            'format_text: true}',
+      );
+
+      // Submit the transcription in the selected language
+      final transcript = await api.submitTranscription({
+        'audio_url': widget.url,
+        'language_code': _selectedLanguageCode,
+        'punctuate': true,
+        'format_text': true,
+      });
+
+      // Get the ID from the transcript
+      final String? id = transcript.id;
+      _transcriptId = id;
+      print(
+        'Received transcript ID: $id for language: ${_selectedLanguage['name']}',
+      );
+
+      if (id == null) {
+        throw Exception('Failed to get transcript ID');
+      }
+
+      // Poll for results until the transcription is completed
+      int attempts = 0;
+      const maxAttempts = 20; // Maximum polling attempts (about 1 minute)
+
+      while (attempts < maxAttempts) {
+        setState(() {
+          _transcriptStatus =
+              "Processing transcript... (${attempts + 1}/$maxAttempts)";
+        });
+
+        print('Polling attempt ${attempts + 1} for transcript ID: $id');
+        final polledTranscript = await api.getTranscription(id);
+        final status = polledTranscript.status;
+        print(
+          'Transcript status: $status for language: ${_selectedLanguage['name']}',
+        );
+
+        if (status == 'completed') {
+          final transcriptText =
+              polledTranscript.text ?? 'No transcript available.';
+          print(
+            'Transcript completed in ${_selectedLanguage['name']}: ${transcriptText.substring(0, math.min(100, transcriptText.length))}...',
+          );
+
+          // Store the transcript in the cache
+          _transcripts[_selectedLanguageCode] = transcriptText;
+
+          setState(() {
+            _assemblyTranscript = transcriptText;
+            _isLoadingTranscript = false;
+            _transcriptStatus = "Completed";
+            _hasTranscriptError = false;
+          });
+          break;
+        } else if (status == 'error') {
+          throw Exception('Transcription failed: ${polledTranscript.error}');
+        } else {
+          // Still processing, wait and check again
+          attempts++;
+          await Future.delayed(const Duration(seconds: 3));
+        }
+      }
+
+      if (attempts >= maxAttempts) {
+        print('Transcript polling timed out after $maxAttempts attempts');
+        setState(() {
+          _assemblyTranscript =
+              "Transcription is taking longer than expected. Please try again later.";
+          _isLoadingTranscript = false;
+          _transcriptStatus = "Timeout";
+          _hasTranscriptError = true;
+        });
+      }
+    } catch (e) {
+      print('Error fetching transcript: $e');
+
+      String errorMessage = 'Failed to fetch transcript: $e';
+
+      // Provide more helpful error messages for common issues
+      if (e.toString().contains('Unauthorized') ||
+          e.toString().contains('401')) {
+        errorMessage =
+            'API Key Error: Please check that your AssemblyAI API key is valid and activated.';
+      } else if (e.toString().contains('audio_url')) {
+        errorMessage =
+            'Audio URL Error: The URL provided is not accessible or not in a supported format.';
+      } else if (e.toString().contains('language_code')) {
+        errorMessage =
+            'Language Code Error: The language code is not valid or not supported.';
+      }
+
+      setState(() {
+        _assemblyTranscript = errorMessage;
+        _isLoadingTranscript = false;
+        _transcriptStatus = "Error";
+        _hasTranscriptError = true;
+      });
+    }
   }
 
   @override
@@ -442,42 +594,70 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.grey.shade300),
                     ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        isExpanded: true,
-                        value: _selectedLanguage,
-                        hint: const Text('Select language'),
-                        icon: Icon(
-                          Icons.keyboard_arrow_down,
-                          color: primaryColor,
-                        ),
-                        style: const TextStyle(
-                          color: Colors.black87,
-                          fontSize: 16,
-                        ),
-                        items:
-                            _languages.map((lang) {
-                              return DropdownMenuItem<String>(
-                                value: lang,
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.language,
-                                      size: 20,
-                                      color: primaryColor.withOpacity(0.7),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Text(lang),
-                                  ],
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  isExpanded: true,
+                                  value: _selectedLanguageCode,
+                                  hint: const Text('Select language'),
+                                  icon: Icon(
+                                    Icons.keyboard_arrow_down,
+                                    color: primaryColor,
+                                  ),
+                                  style: const TextStyle(
+                                    color: Colors.black87,
+                                    fontSize: 16,
+                                  ),
+                                  items:
+                                      _languageOptions.map((lang) {
+                                        return DropdownMenuItem<String>(
+                                          value: lang['code'],
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.language,
+                                                size: 20,
+                                                color: primaryColor.withOpacity(
+                                                  0.7,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Text(lang['name']!),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
+                                  onChanged: (code) {
+                                    if (code != null &&
+                                        code != _selectedLanguageCode) {
+                                      setState(() {
+                                        _selectedLanguageCode = code;
+                                      });
+                                      // Fetch transcript in the new language
+                                      _fetchAssemblyTranscript();
+                                    }
+                                  },
                                 ),
-                              );
-                            }).toList(),
-                        onChanged: (lang) {
-                          setState(() {
-                            _selectedLanguage = lang;
-                          });
-                        },
-                      ),
+                              ),
+                            ),
+                            if (_isLoadingTranscript)
+                              Container(
+                                margin: const EdgeInsets.only(left: 8.0),
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: primaryColor,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
 
@@ -504,27 +684,129 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Icon(Icons.subject, color: primaryColor, size: 20),
-                            const SizedBox(width: 8),
-                            Text(
-                              _selectedLanguage != null
-                                  ? '$_selectedLanguage Transcript'
-                                  : 'Transcript',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.subject,
+                                  color: primaryColor,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '${_selectedLanguage['name']} Transcript',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
                             ),
+                            if (_isLoadingTranscript)
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: primaryColor,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Loading...',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ),
                           ],
                         ),
                         const SizedBox(height: 16),
-                        Text(
-                          _selectedLanguage != null
-                              ? _transcripts[_selectedLanguage!]!
-                              : 'Please select a language to see the transcript.',
-                          style: const TextStyle(fontSize: 16, height: 1.5),
-                        ),
+                        // Error with retry button
+                        if (_hasTranscriptError)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.error_outline,
+                                      color: Colors.red,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Error loading transcript in ${_selectedLanguage['name']}',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.red.shade800,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _assemblyTranscript ??
+                                      'An error occurred while processing your request.',
+                                  style: TextStyle(color: Colors.red.shade700),
+                                ),
+                                if (_assemblyTranscript != null &&
+                                    _assemblyTranscript!.contains(
+                                      "API Key Error",
+                                    ))
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Text(
+                                      "Tip: You can create/verify your API key at app.assemblyai.com",
+                                      style: TextStyle(
+                                        color: Colors.grey.shade700,
+                                        fontSize: 12,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 12),
+                                ElevatedButton.icon(
+                                  onPressed: _fetchAssemblyTranscript,
+                                  icon: const Icon(Icons.refresh, size: 18),
+                                  label: const Text('Retry'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: primaryColor,
+                                    foregroundColor: Colors.white,
+                                    textStyle: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          Text(
+                            _isLoadingTranscript
+                                ? 'Loading transcript in ${_selectedLanguage['name']}... $_transcriptStatus'
+                                : (_assemblyTranscript ??
+                                    'No transcript available for ${_selectedLanguage['name']}'),
+                            style: const TextStyle(fontSize: 16, height: 1.5),
+                          ),
                         const SizedBox(height: 8),
                       ],
                     ),

@@ -9,7 +9,7 @@
     <uses-feature android:name="android.hardware.microphone" />
     
     <application
-        android:label="helpmeout_flutter"
+        android:label="HelpMeOut"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

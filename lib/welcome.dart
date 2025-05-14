@@ -8,6 +8,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'Authentication/login.dart';
 import 'video-details-page.dart';
 import 'package:helpmeout_flutter/Authentication//auth_service.dart';
+import 'upload_video_screen.dart';
+import 'legal/legal_center.dart';
 
 import 'Widgets/VideoCard.dart';
 
@@ -62,16 +64,36 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAndFetch();
+    _checkUserAndLoadData();
+  }
+
+  Future<void> _checkUserAndLoadData() async {
+    // Check if user is logged in
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      // If not logged in, redirect to login page
+      Navigator.of(context).pushReplacementNamed('/login');
+      return;
+    }
+
+    // User is logged in, load data
+    setState(() {
+      uid = currentUser.uid;
+    });
+
+    await _loadAndFetch();
   }
 
   Future<void> _loadAndFetch() async {
     await _fetchUserData();
     final videos = await fetchVideos(uid);
-    setState(() {
-      _videos = videos;
-      _filtVideos = videos;
-    });
+
+    if (mounted) {
+      setState(() {
+        _videos = videos;
+        _filtVideos = videos;
+      });
+    }
   }
 
   Future<void> _fetchUserData() async {
@@ -92,39 +114,75 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Future<List<Map<String, dynamic>>> fetchVideos(String uid) async {
-    final userVideoRef = FirebaseStorage.instance.ref().child('videos/$uid');
     final List<Map<String, dynamic>> videoList = [];
+
     try {
-      final ListResult result = await userVideoRef.listAll();
-      for (final item in result.items) {
-        final url = await item.getDownloadURL();
-        final name = item.name;
-        final FullMetadata meta = await item.getMetadata();
-        final DateTime? createdAt = meta.timeCreated;
-        videoList.add({'name': name, 'url': url, 'createdAt': createdAt});
-        videoList.sort((a, b) {
-          final DateTime da = a['createdAt'] as DateTime? ?? DateTime(1970);
-          final DateTime db = b['createdAt'] as DateTime? ?? DateTime(1970);
-          return db.compareTo(da);
+      // Fetch videos from Firestore instead of Storage
+      final QuerySnapshot snapshot =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .collection('videos')
+              .orderBy('uploadedAt', descending: true)
+              .get();
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+
+        // Get download URL and other metadata
+        final String name = data['videoName'] ?? 'Unnamed Video';
+        final String url = data['downloadURL'] ?? '';
+        final Timestamp? uploadTime = data['uploadedAt'] as Timestamp?;
+        final DateTime? createdAt = uploadTime?.toDate();
+
+        videoList.add({
+          'name': name,
+          'url': url,
+          'createdAt': createdAt,
+          'id': doc.id, // Store document ID for deletion
+          'storagePath': data['storagePath'],
         });
-        print(videoList);
       }
+
+      print('Fetched ${videoList.length} videos from Firestore');
     } catch (e) {
-      print("Error fetching video : $e");
+      print("Error fetching videos from Firestore: $e");
     }
+
     return videoList;
   }
 
   Future<void> _deleteVideo(int index) async {
     final vid = _filtVideos[index];
     final name = vid['name'] as String;
+    final String? docId = vid['id'] as String?;
+    final String? storagePath = vid['storagePath'] as String?;
+
     try {
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('videos')
-          .child(uid)
-          .child(name);
-      await storageRef.delete();
+      // Delete from Storage
+      if (storagePath != null) {
+        final storageRef = FirebaseStorage.instance.ref().child(storagePath);
+        await storageRef.delete();
+      } else {
+        // Fallback to old method if storagePath is not available
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('videos')
+            .child(uid)
+            .child(name);
+        await storageRef.delete();
+      }
+
+      // Delete from Firestore
+      if (docId != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('videos')
+            .doc(docId)
+            .delete();
+      }
+
       await _loadAndFetch();
       ScaffoldMessenger.of(
         context,
@@ -176,9 +234,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 1,
-        title: const Row(
+        title: Row(
           children: [
-            Text(
+            Image.asset('images/logo.png', width: 32, height: 32),
+            const SizedBox(width: 8),
+            const Text(
               'HelpMeOut',
               style: TextStyle(
                 color: primaryColor,
@@ -190,6 +250,19 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         ),
         automaticallyImplyLeading: false,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline, size: 22),
+            color: primaryColor,
+            tooltip: 'Legal Information',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const LegalCenterScreen(),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout, size: 22),
             color: primaryColor,
@@ -280,7 +353,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                       child: ElevatedButton.icon(
                         icon: const Icon(Icons.upload_file),
                         label: const Text('Upload Video'),
-                        onPressed: () {},
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const UploadVideoScreen(),
+                            ),
+                          );
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
                           foregroundColor: primaryColor,

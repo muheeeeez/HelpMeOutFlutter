@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:helpmeout_flutter/Authentication/login.dart';
 import 'package:helpmeout_flutter/Authentication/auth_service.dart';
+import 'package:helpmeout_flutter/legal/legal_center.dart';
+import 'package:helpmeout_flutter/legal/privacy_policy.dart';
+import 'package:helpmeout_flutter/legal/terms_conditions.dart';
 import 'dart:developer';
 
 // Define app colors
@@ -16,6 +19,7 @@ class register extends StatefulWidget {
 
 class registerState extends State<register> {
   bool isVisible = true;
+  bool _acceptedTerms = false;
   final TextEditingController _firstName = TextEditingController();
   final TextEditingController _lastName = TextEditingController();
   final TextEditingController _email = TextEditingController();
@@ -64,7 +68,7 @@ class registerState extends State<register> {
                     ),
                     child: CircleAvatar(
                       radius: 60,
-                      backgroundColor: accentColor,
+                      backgroundColor: primaryColor,
                       child: Icon(
                         Icons.person_add,
                         size: 70,
@@ -158,6 +162,92 @@ class registerState extends State<register> {
                     },
                   ),
 
+                  const SizedBox(height: 24),
+
+                  // Terms and Conditions Checkbox
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: Checkbox(
+                          value: _acceptedTerms,
+                          activeColor: primaryColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          onChanged: (value) {
+                            setState(() {
+                              _acceptedTerms = value ?? false;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Wrap(
+                          children: [
+                            const Text(
+                              'I agree to the ',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) =>
+                                            const TermsConditionsScreen(),
+                                  ),
+                                );
+                              },
+                              child: const Text(
+                                'Terms & Conditions',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: primaryColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            const Text(
+                              ' and ',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) =>
+                                            const PrivacyPolicyScreen(),
+                                  ),
+                                );
+                              },
+                              child: const Text(
+                                'Privacy Policy',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: primaryColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
                   const SizedBox(height: 40),
 
                   // Sign Up Button
@@ -174,7 +264,7 @@ class registerState extends State<register> {
                         ),
                       ),
                       onPressed:
-                          isLoading
+                          isLoading || !_acceptedTerms
                               ? null
                               : () async {
                                 if (formKey.currentState!.validate()) {
@@ -206,16 +296,37 @@ class registerState extends State<register> {
                                   if (message!.contains(
                                     'Sign-up successful! Please verify your email.',
                                   )) {
-                                    Future.delayed(
-                                      const Duration(seconds: 2),
-                                      () {
-                                        Navigator.pushReplacement(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => const login(),
+                                    // Display a success dialog
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder:
+                                          (context) => AlertDialog(
+                                            title: const Text(
+                                              'Registration Successful',
+                                            ),
+                                            content: const Text(
+                                              'A verification email has been sent to your email address. '
+                                              'Please verify your email to continue.',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () {
+                                                  Navigator.pop(
+                                                    context,
+                                                  ); // Close dialog
+                                                  Navigator.pushReplacement(
+                                                    context,
+                                                    MaterialPageRoute(
+                                                      builder:
+                                                          (_) => const login(),
+                                                    ),
+                                                  );
+                                                },
+                                                child: const Text('OK'),
+                                              ),
+                                            ],
                                           ),
-                                        );
-                                      },
                                     );
                                   }
                                 }
