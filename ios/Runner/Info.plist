@@ -51,9 +51,15 @@
 		<key>NSMicrophoneUsageDescription</key>
 		<string>This app needs microphone access to record audio with videos</string>
 		<key>NSPhotoLibraryUsageDescription</key>
-		<string>This app needs photo library access to upload videos</string>
+		<string>Save video in gallery</string>
 		<key>NSPhotoLibraryAddUsageDescription</key>
 		<string>This app needs photo library access to save recorded videos</string>
+		<key>NSFileProviderDomainUsageDescription</key>
+		<string>This app needs to save screen recordings to your device</string>
+		<key>NSAppleMusicUsageDescription</key>
+		<string>This app needs access to save screen recordings</string>
+		<key>NSScreenCaptureUsageDescription</key>
+		<string>This app needs screen recording access to capture your screen</string>
 		<key>UIStatusBarHidden</key>
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>

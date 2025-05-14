@@ -1,13 +1,15 @@
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 // Import your AuthService and LoginScreen:
 import 'Authentication/login.dart';
 import 'video-details-page.dart';
-import 'package:helpmeout_flutter/Authentication//auth_service.dart';
+import 'Authentication/auth_service.dart';
 import 'upload_video_screen.dart';
 import 'legal/legal_center.dart';
 
@@ -17,29 +19,6 @@ import 'Widgets/VideoCard.dart';
 const Color primaryColor = Color(0xFF0A2472); // Dark blue
 const Color accentColor = Color(0xFF1E88E5); // Lighter blue
 const Color backgroundColor = Color(0xFFF5F7FA); // Light background
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'HelpMeOut',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        primaryColor: primaryColor,
-        scaffoldBackgroundColor: backgroundColor,
-      ),
-      home: const WelcomeScreen(),
-    );
-  }
-}
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -55,16 +34,25 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   String lastName = '';
   List<Map<String, dynamic>> _videos = [];
   List<Map<String, dynamic>> _filtVideos = [];
+  bool _isLoading = true;
+  bool _isRefreshing = false;
 
   String uid = '';
   final User? user = FirebaseAuth.instance.currentUser;
 
-  // your items list...
-
   @override
   void initState() {
     super.initState();
-    _checkUserAndLoadData();
+    // Delay user check to avoid blocking UI rendering
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkUserAndLoadData();
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _checkUserAndLoadData() async {
@@ -72,7 +60,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       // If not logged in, redirect to login page
-      Navigator.of(context).pushReplacementNamed('/login');
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
       return;
     }
 
@@ -85,31 +75,57 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Future<void> _loadAndFetch() async {
-    await _fetchUserData();
-    final videos = await fetchVideos(uid);
+    if (_isRefreshing) return;
 
-    if (mounted) {
-      setState(() {
-        _videos = videos;
-        _filtVideos = videos;
-      });
+    setState(() {
+      _isLoading = true;
+      _isRefreshing = true;
+    });
+
+    try {
+      await _fetchUserData();
+      final videos = await fetchVideos(uid);
+
+      if (mounted) {
+        setState(() {
+          _videos = videos;
+          _filtVideos = videos;
+          _isLoading = false;
+          _isRefreshing = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading data: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isRefreshing = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading data: ${e.toString()}')),
+        );
+      }
     }
   }
 
   Future<void> _fetchUserData() async {
-    if (user != null) {
-      final doc =
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user!.uid)
-              .get();
-      if (doc.exists) {
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user!.uid)
+          .get();
+
+      if (doc.exists && mounted) {
         setState(() {
-          firstName = doc['firstName'];
-          lastName = doc['lastName'];
+          firstName = doc['firstName'] ?? '';
+          lastName = doc['lastName'] ?? '';
           uid = user!.uid;
         });
       }
+    } catch (e) {
+      print('Error fetching user data: $e');
     }
   }
 
@@ -117,14 +133,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final List<Map<String, dynamic>> videoList = [];
 
     try {
-      // Fetch videos from Firestore instead of Storage
-      final QuerySnapshot snapshot =
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(uid)
-              .collection('videos')
-              .orderBy('uploadedAt', descending: true)
-              .get();
+      // Fetch videos from Firestore with a limit to improve performance
+      final QuerySnapshot snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('videos')
+          .orderBy('uploadedAt', descending: true)
+          .limit(50) // Limit the number of videos to improve performance
+          .get();
 
       for (final doc in snapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
@@ -143,8 +159,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           'storagePath': data['storagePath'],
         });
       }
-
-      print('Fetched ${videoList.length} videos from Firestore');
     } catch (e) {
       print("Error fetching videos from Firestore: $e");
     }
@@ -158,18 +172,37 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final String? docId = vid['id'] as String?;
     final String? storagePath = vid['storagePath'] as String?;
 
+    // Show confirmation dialog
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm Deletion'),
+        content: Text('Are you sure you want to delete "$name"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    // If user cancels or dismisses the dialog
+    if (shouldDelete != true) {
+      return;
+    }
+
     try {
       // Delete from Storage
       if (storagePath != null) {
         final storageRef = FirebaseStorage.instance.ref().child(storagePath);
-        await storageRef.delete();
-      } else {
-        // Fallback to old method if storagePath is not available
-        final storageRef = FirebaseStorage.instance
-            .ref()
-            .child('videos')
-            .child(uid)
-            .child(name);
         await storageRef.delete();
       }
 
@@ -184,48 +217,75 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       }
 
       await _loadAndFetch();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Deleted "$name"')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Deleted "$name"')));
+      }
     } catch (e) {
       print('Error deleting video: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete "$name": ${e.toString()}')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete "$name": ${e.toString()}')),
+        );
+      }
     }
   }
 
   Future<void> _confirmLogout() async {
     final shouldLogout = await showDialog<bool>(
       context: context,
-      builder:
-          (ctx) => AlertDialog(
-            title: const Text('Confirm Logout'),
-            content: const Text('Are you sure you want to log out?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text(
-                  'Logout',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            ],
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm Logout'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Logout',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
     );
 
     if (shouldLogout == true) {
       await _authService.signOut();
-      // Replace with your actual login screen navigation:
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const login()),
-        (route) => false,
-      );
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const login()),
+          (route) => false,
+        );
+      }
     }
+  }
+
+  void _filterVideos(String query) {
+    if (!mounted) return;
+
+    // Use a post-frame callback to avoid doing filtering work during build
+    Future.microtask(() {
+      if (mounted) {
+        setState(() {
+          if (query.isEmpty) {
+            _filtVideos = _videos;
+          } else {
+            _filtVideos = _videos
+                .where(
+                  (video) => video['name'].toString().toLowerCase().contains(
+                        query.toLowerCase(),
+                      ),
+                )
+                .toList();
+          }
+        });
+      }
+    });
   }
 
   @override
@@ -251,17 +311,29 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh, size: 22),
+            color: primaryColor,
+            tooltip: 'Refresh Videos',
+            onPressed: _isRefreshing
+                ? null
+                : () {
+                    _loadAndFetch().then((_) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Videos refreshed'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      }
+                    });
+                  },
+          ),
+          IconButton(
             icon: const Icon(Icons.info_outline, size: 22),
             color: primaryColor,
             tooltip: 'Legal Information',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const LegalCenterScreen(),
-                ),
-              );
-            },
+            onPressed: () => Navigator.pushNamed(context, '/legal'),
           ),
           IconButton(
             icon: const Icon(Icons.logout, size: 22),
@@ -272,269 +344,278 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         ],
       ),
       backgroundColor: backgroundColor,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Welcome section
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 20,
-                    horizontal: 16,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
-                        spreadRadius: 1,
-                        blurRadius: 5,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Welcome, $firstName $lastName',
-                        style: const TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: primaryColor,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Here are your recorded videos',
-                        style: TextStyle(fontSize: 16, color: Colors.black54),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.videocam_rounded),
-                        label: const Text('Start Recording'),
-                        onPressed: () {},
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: const Text(
-                        "Or",
-                        style: TextStyle(
-                          color: Colors.grey,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('Upload Video'),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const UploadVideoScreen(),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: primaryColor),
+            )
+          : SafeArea(
+              child: RefreshIndicator(
+                onRefresh: _loadAndFetch,
+                color: primaryColor,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Welcome section
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 20,
+                                horizontal: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.grey.withOpacity(0.1),
+                                    spreadRadius: 1,
+                                    blurRadius: 5,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Welcome, $firstName $lastName',
+                                    style: const TextStyle(
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.bold,
+                                      color: primaryColor,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Here are your recorded videos',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: primaryColor,
-                          elevation: 2,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            side: BorderSide(color: primaryColor),
-                          ),
+
+                            const SizedBox(height: 24),
+
+                            // Action buttons
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.grey.withOpacity(0.1),
+                                    spreadRadius: 1,
+                                    blurRadius: 5,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  const Icon(
+                                    Icons.videocam_rounded,
+                                    size: 48,
+                                    color: primaryColor,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'Record or Upload Video',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: primaryColor,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Share your screen or upload a video to get help',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceEvenly,
+                                    children: [
+                                      // Screen Recording Button (Coming Soon)
+                                      Expanded(
+                                        child: ElevatedButton.icon(
+                                          icon: const Icon(Icons.record_voice_over),
+                                          label: const Text('Start Recording'),
+                                          onPressed: null,
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: primaryColor,
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      // Upload Video Button (Working)
+                                      Expanded(
+                                        child: ElevatedButton.icon(
+                                          icon: const Icon(Icons.upload_file),
+                                          label: const Text('Upload Video'),
+                                          onPressed: () {
+                                            print(
+                                              "Opening upload video screen...",
+                                            );
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    const UploadVideoScreen(),
+                                              ),
+                                            ).then((_) {
+                                              print(
+                                                "Returned from upload screen, refreshing...",
+                                              );
+                                              _loadAndFetch();
+                                            });
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: primaryColor,
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            // Search field
+                            TextField(
+                              controller: _searchController,
+                              onChanged: _filterVideos,
+                              decoration: InputDecoration(
+                                hintText: 'Search videos...',
+                                prefixIcon: const Icon(
+                                  Icons.search,
+                                  color: Colors.grey,
+                                ),
+                                fillColor: Colors.white,
+                                filled: true,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                  horizontal: 16,
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // Section title - Your videos
+                            _filtVideos.isEmpty
+                                ? const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(32.0),
+                                      child: Column(
+                                        children: [
+                                          Icon(
+                                            Icons.videocam_off,
+                                            size: 48,
+                                            color: Colors.grey,
+                                          ),
+                                          SizedBox(height: 16),
+                                          Text(
+                                            'No videos found',
+                                            style: TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                          SizedBox(height: 8),
+                                          Text(
+                                            'Upload your first video to get started',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                : const Padding(
+                                    padding: EdgeInsets.only(bottom: 12.0),
+                                    child: Text(
+                                      'Your Videos',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: primaryColor,
+                                      ),
+                                    ),
+                                  ),
+                          ],
                         ),
                       ),
                     ),
-                  ],
-                ),
 
-                const SizedBox(height: 24),
-
-                // Search bar
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search your videos...',
-                    prefixIcon: const Icon(Icons.search, color: primaryColor),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey.shade200),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: primaryColor),
-                    ),
-                  ),
-                  onChanged: (query) {
-                    final lower = query.toLowerCase();
-                    setState(() {
-                      _filtVideos =
-                          _videos.where((vid) {
-                            final name = (vid['name']).toLowerCase();
-                            return name.contains(lower);
-                          }).toList();
-                    });
-                  },
-                ),
-
-                const SizedBox(height: 24),
-
-                // Recent files section
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
-                        spreadRadius: 1,
-                        blurRadius: 5,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            "Recent Videos",
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          TextButton.icon(
-                            icon: const Icon(Icons.refresh, size: 16),
-                            label: const Text("Refresh"),
-                            onPressed: _loadAndFetch,
-                            style: TextButton.styleFrom(
-                              foregroundColor: primaryColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _filtVideos.isEmpty
-                          ? const Center(child: Text('No videos yet'))
-                          : ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _filtVideos.length,
-                            itemBuilder: (ctx, i) {
-                              final vid = _filtVideos[i];
-                              final name = vid['name']!;
+                    // Video list
+                    _filtVideos.isEmpty
+                        ? SliverToBoxAdapter(child: Container())
+                        : SliverList(
+                            delegate: SliverChildBuilderDelegate((
+                              context,
+                              index,
+                            ) {
+                              final video = _filtVideos[index];
                               return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0,
+                                ),
                                 child: VideoCard(
-                                  videoUrl: vid['url']!,
-                                  fileName: vid['name']!,
-                                  availableDate: vid['createdAt'] as DateTime,
+                                  videoUrl: video['url'],
+                                  fileName: video['name'],
+                                  availableDate:
+                                      video['createdAt'] ?? DateTime.now(),
                                   onViewDetails: () {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder:
-                                            (context) => VideoDetailsPage(
-                                              url: vid['url']!,
-                                              name: vid['name']!,
-                                            ),
+                                        builder: (context) => VideoDetailsPage(
+                                          url: video['url'],
+                                          name: video['name'],
+                                        ),
                                       ),
                                     );
                                   },
-                                  onDelete: () async {
-                                    final bool?
-                                    didConfirm = await showDialog<bool>(
-                                      context: context,
-                                      builder: (BuildContext dialogContext) {
-                                        return AlertDialog(
-                                          title: const Text('Delete Video'),
-                                          content: Text(
-                                            'Are you sure you want to delete "$name"?',
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () {
-                                                Navigator.of(
-                                                  dialogContext,
-                                                ).pop(false);
-                                              },
-                                              child: const Text('Cancel'),
-                                            ),
-                                            TextButton(
-                                              onPressed: () {
-                                                Navigator.of(
-                                                  dialogContext,
-                                                ).pop(true);
-                                              },
-                                              child: const Text(
-                                                'Delete',
-                                                style: TextStyle(
-                                                  color: Colors.red,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-
-                                    if (didConfirm == true) {
-                                      await _deleteVideo(i);
-                                    }
-                                  },
+                                  onDelete: () => _deleteVideo(index),
                                 ),
                               );
-                            },
+                            }, childCount: _filtVideos.length),
                           ),
 
-                      // Video card
-                    ],
-                  ),
+                    SliverPadding(padding: const EdgeInsets.only(bottom: 24)),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

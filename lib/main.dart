@@ -10,24 +10,56 @@ import 'welcome.dart';
 import 'legal/legal_center.dart';
 import 'legal/privacy_policy.dart';
 import 'legal/terms_conditions.dart';
+import 'dart:developer' as developer;
 
 // Define app colors
 const Color primaryColor = Color(0xFF0A2472); // Dark blue
 const Color accentColor = Color(0xFF1E88E5); // Lighter blue
 const Color backgroundColor = Color(0xFFF5F7FA); // Light background
 
+// Debug helper
+void log(String message) {
+  developer.log(message, name: 'HelpMeOut');
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.debug,
-    appleProvider: AppleProvider.debug,
-  );
-  // PRODUCTION: switch to PlayIntegrity on Android, DeviceCheck on iOS:
-  // await FirebaseAppCheck.instance.activate(
-  //   androidProvider: AndroidProvider.playIntegrity,
-  //   appleProvider: AppleProvider.deviceCheck,
-  // );
+
+  // Initialize Firebase with error handling
+  try {
+    log('Initializing Firebase...');
+    await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform);
+    log('Firebase initialized successfully');
+
+    // Set persistence to LOCAL for better offline support
+    await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+
+    // Print auth state for debugging
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user == null) {
+        log('User is currently signed out');
+      } else {
+        log('User is signed in: ${user.email}, verified: ${user.emailVerified}');
+      }
+    });
+  } catch (e) {
+    log('Error initializing Firebase: $e');
+  }
+
+  // Initialize App Check with error handling
+  try {
+    log('Initializing Firebase App Check...');
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.debug,
+      appleProvider: AppleProvider.debug,
+    );
+    log('Firebase App Check initialized successfully');
+  } catch (e) {
+    log('Error initializing Firebase App Check: $e');
+    // Continue without App Check, it's not critical for auth functionality
+  }
+
   runApp(const MyApp());
 }
 
@@ -63,62 +95,24 @@ class MyApp extends StatelessWidget {
           elevation: 0,
         ),
       ),
-      home: AuthenticationWrapper(),
-      onGenerateRoute: (settings) {
-        // Define route transitions
-        Widget page;
-
-        switch (settings.name) {
-          case '/home':
-            page = HomePage();
-            break;
-          case '/login':
-            page = const login();
-            break;
-          case '/register':
-            page = const register();
-            break;
-          case '/welcome':
-            page = const WelcomeScreen();
-            break;
-          case '/record':
-            page = const UploadVideoScreen();
-            break;
-          case '/legal':
-            page = const LegalCenterScreen();
-            break;
-          case '/privacy':
-            page = const PrivacyPolicyScreen();
-            break;
-          case '/terms':
-            page = const TermsConditionsScreen();
-            break;
-          default:
-            page = AuthenticationWrapper();
-        }
-
-        return PageRouteBuilder(
-          settings: settings,
-          pageBuilder: (_, __, ___) => page,
-          transitionsBuilder: (_, animation, __, child) {
-            const begin = Offset(1.0, 0.0);
-            const end = Offset.zero;
-            const curve = Curves.easeInOut;
-            var tween = Tween(
-              begin: begin,
-              end: end,
-            ).chain(CurveTween(curve: curve));
-            var offsetAnimation = animation.drive(tween);
-            return SlideTransition(position: offsetAnimation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 300),
-        );
+      home: const AuthenticationWrapper(),
+      routes: {
+        '/home': (context) => const HomePage(),
+        '/login': (context) => const login(),
+        '/register': (context) => const register(),
+        '/welcome': (context) => const WelcomeScreen(),
+        '/record': (context) => const UploadVideoScreen(),
+        '/legal': (context) => const LegalCenterScreen(),
+        '/privacy': (context) => const PrivacyPolicyScreen(),
+        '/terms': (context) => const TermsConditionsScreen(),
       },
     );
   }
 }
 
 class AuthenticationWrapper extends StatelessWidget {
+  const AuthenticationWrapper({super.key});
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -126,13 +120,7 @@ class AuthenticationWrapper extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.active) {
           final User? user = snapshot.data;
-          if (user == null) {
-            // User is not signed in
-            return HomePage();
-          } else {
-            // User is signed in
-            return const WelcomeScreen();
-          }
+          return user == null ? const HomePage() : const WelcomeScreen();
         }
 
         // Checking authentication state
@@ -143,7 +131,7 @@ class AuthenticationWrapper extends StatelessWidget {
 }
 
 class HomePage extends StatelessWidget {
-  HomePage({super.key});
+  const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -200,17 +188,7 @@ class HomePage extends StatelessWidget {
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pushNamed(context, '/login');
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor,
-                      foregroundColor: Colors.white,
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
+                    onPressed: () => Navigator.pushNamed(context, '/login'),
                     child: const Text(
                       'Login',
                       style: TextStyle(
@@ -226,9 +204,7 @@ class HomePage extends StatelessWidget {
                   width: double.infinity,
                   height: 56,
                   child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.pushNamed(context, '/register');
-                    },
+                    onPressed: () => Navigator.pushNamed(context, '/register'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: primaryColor,
                       side: const BorderSide(color: primaryColor, width: 1.5),
@@ -248,14 +224,7 @@ class HomePage extends StatelessWidget {
                 const SizedBox(height: 24),
                 // Legal information link
                 TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const LegalCenterScreen(),
-                      ),
-                    );
-                  },
+                  onPressed: () => Navigator.pushNamed(context, '/legal'),
                   child: const Text(
                     'Privacy Policy & Terms',
                     style: TextStyle(color: Colors.grey, fontSize: 14),

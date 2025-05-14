@@ -200,9 +200,8 @@ class registerState extends State<register> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder:
-                                        (context) =>
-                                            const TermsConditionsScreen(),
+                                    builder: (context) =>
+                                        const TermsConditionsScreen(),
                                   ),
                                 );
                               },
@@ -227,9 +226,8 @@ class registerState extends State<register> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder:
-                                        (context) =>
-                                            const PrivacyPolicyScreen(),
+                                    builder: (context) =>
+                                        const PrivacyPolicyScreen(),
                                   ),
                                 );
                               },
@@ -263,91 +261,119 @@ class registerState extends State<register> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      onPressed:
-                          isLoading || !_acceptedTerms
-                              ? null
-                              : () async {
-                                if (formKey.currentState!.validate()) {
-                                  setState(() {
-                                    isLoading = true;
-                                  });
+                      onPressed: isLoading || !_acceptedTerms
+                          ? null
+                          : () async {
+                              if (formKey.currentState!.validate()) {
+                                setState(() {
+                                  isLoading = true;
+                                });
 
-                                  final message = await _authService.signUp(
-                                    email: _email.text.trim(),
-                                    password: _password.text.trim(),
-                                    firstName: _firstName.text.trim(),
-                                    lastName: _lastName.text.trim(),
+                                final message = await _authService.signUp(
+                                  email: _email.text.trim(),
+                                  password: _password.text.trim(),
+                                  firstName: _firstName.text.trim(),
+                                  lastName: _lastName.text.trim(),
+                                );
+
+                                setState(() {
+                                  isLoading = false;
+                                });
+
+                                if (message != null) {
+                                  log("data: $message");
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(message),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
                                   );
-
-                                  setState(() {
-                                    isLoading = false;
-                                  });
-
-                                  if (message != null) {
-                                    log("data: $message");
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(message),
-                                        behavior: SnackBarBehavior.floating,
-                                      ),
-                                    );
-                                  }
-
-                                  if (message!.contains(
-                                    'Sign-up successful! Please verify your email.',
-                                  )) {
-                                    // Display a success dialog
-                                    showDialog(
-                                      context: context,
-                                      barrierDismissible: false,
-                                      builder:
-                                          (context) => AlertDialog(
-                                            title: const Text(
-                                              'Registration Successful',
-                                            ),
-                                            content: const Text(
-                                              'A verification email has been sent to your email address. '
-                                              'Please verify your email to continue.',
-                                            ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () {
-                                                  Navigator.pop(
-                                                    context,
-                                                  ); // Close dialog
-                                                  Navigator.pushReplacement(
-                                                    context,
-                                                    MaterialPageRoute(
-                                                      builder:
-                                                          (_) => const login(),
-                                                    ),
-                                                  );
-                                                },
-                                                child: const Text('OK'),
-                                              ),
-                                            ],
-                                          ),
-                                    );
-                                  }
                                 }
-                              },
-                      child:
-                          isLoading
-                              ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.0,
-                                ),
-                              )
-                              : const Text(
-                                "Sign Up",
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
+
+                                if (message!.contains('Sign-up successful!')) {
+                                  // Display a success dialog
+                                  showDialog(
+                                    context: context,
+                                    barrierDismissible: false,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text(
+                                        'Registration Successful',
+                                      ),
+                                      content: const Text(
+                                        'A verification email has been sent to your email address. '
+                                        'Please check your inbox and spam folder. '
+                                        'You must verify your email before you can login.',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(
+                                              context,
+                                            ); // Close dialog
+                                            Navigator.pushReplacement(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => const login(),
+                                              ),
+                                            );
+                                          },
+                                          child: const Text('OK'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                } else if (message
+                                    .contains('already registered')) {
+                                  // Display dialog for already registered email
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('Account Exists'),
+                                      content: const Text(
+                                          'This email is already registered. Would you like to login instead?'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(
+                                                context); // Close dialog
+                                          },
+                                          child: const Text('Cancel'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(
+                                                context); // Close dialog
+                                            Navigator.pushReplacement(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => const login(),
+                                              ),
+                                            );
+                                          },
+                                          child: const Text('Go to Login'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                      child: isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.0,
                               ),
+                            )
+                          : const Text(
+                              "Sign Up",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
 
@@ -408,20 +434,19 @@ class registerState extends State<register> {
           fontWeight: FontWeight.w500,
         ),
         prefixIcon: Icon(icon, color: primaryColor),
-        suffixIcon:
-            isPassword
-                ? IconButton(
-                  onPressed: () {
-                    setState(() {
-                      isVisible = !isVisible;
-                    });
-                  },
-                  icon: Icon(
-                    isVisible ? Icons.visibility : Icons.visibility_off,
-                    color: primaryColor,
-                  ),
-                )
-                : null,
+        suffixIcon: isPassword
+            ? IconButton(
+                onPressed: () {
+                  setState(() {
+                    isVisible = !isVisible;
+                  });
+                },
+                icon: Icon(
+                  isVisible ? Icons.visibility : Icons.visibility_off,
+                  color: primaryColor,
+                ),
+              )
+            : null,
         filled: true,
         fillColor: Colors.grey[100],
         border: OutlineInputBorder(

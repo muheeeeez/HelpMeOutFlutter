@@ -3,8 +3,11 @@ import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:assemblyai_flutter_sdk/assemblyai_flutter_sdk.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:io' show Platform;
 
 // Define app colors
 const Color primaryColor = Color(0xFF0A2472); // Dark blue
@@ -15,7 +18,7 @@ class VideoDetailsPage extends StatefulWidget {
   final String name;
 
   const VideoDetailsPage({Key? key, required this.url, required this.name})
-    : super(key: key);
+      : super(key: key);
 
   @override
   State<VideoDetailsPage> createState() => _VideoDetailsPageState();
@@ -129,16 +132,101 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     }
   }
 
+  // Sharing functionality
   void _shareVia(String platform) {
-    // This would be implemented with actual sharing functionality
-    // using packages like share_plus or platform-specific sharing
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Sharing via $platform coming soon'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
+    final textToShare = _shortUrl ?? widget.url;
+    final nameToShare = widget.name;
+    final shareText = 'Check out this video: $nameToShare\n$textToShare';
+
+    switch (platform) {
+      case 'Email':
+        _shareViaEmail(shareText);
+        break;
+      case 'WhatsApp':
+        _shareViaWhatsApp(shareText);
+        break;
+      case 'Telegram':
+        _shareViaTelegram(shareText);
+        break;
+      case 'Facebook':
+        _shareViaFacebook(textToShare);
+        break;
+      default:
+        // Default share action if platform not specified
+        Share.share(shareText);
+    }
+  }
+
+  // Email sharing function
+  void _shareViaEmail(String text) async {
+    final Uri emailLaunchUri = Uri(
+      scheme: 'mailto',
+      path: '',
+      query: encodeQueryParameters({
+        'subject': 'Check out this video: ${widget.name}',
+        'body': text,
+      }),
     );
+
+    _launchUrlHelper(emailLaunchUri.toString());
+  }
+
+  // WhatsApp sharing function
+  void _shareViaWhatsApp(String text) async {
+    var whatsappUrl = "";
+
+    try {
+      if (Platform.isIOS) {
+        whatsappUrl = "whatsapp://send?text=${Uri.encodeComponent(text)}";
+      } else {
+        whatsappUrl = "https://wa.me/?text=${Uri.encodeComponent(text)}";
+      }
+
+      _launchUrlHelper(whatsappUrl);
+    } catch (e) {
+      print('Error with WhatsApp sharing: $e');
+      // Fall back to default share
+      Share.share(text);
+    }
+  }
+
+  // Telegram sharing function
+  void _shareViaTelegram(String text) async {
+    final telegramUrl =
+        "https://t.me/share/url?url=${Uri.encodeComponent(_shortUrl ?? widget.url)}&text=${Uri.encodeComponent('Check out this video: ${widget.name}')}";
+    _launchUrlHelper(telegramUrl);
+  }
+
+  // Facebook sharing function
+  void _shareViaFacebook(String url) async {
+    final facebookUrl =
+        "https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(url)}";
+    _launchUrlHelper(facebookUrl);
+  }
+
+  // Helper function to encode query parameters
+  String? encodeQueryParameters(Map<String, String> params) {
+    return params.entries
+        .map((MapEntry<String, String> e) =>
+            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+  }
+
+  // Launch URL helper
+  Future<void> _launchUrlHelper(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    try {
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+        // If launching fails, use the general share sheet
+        Share.share(
+            'Check out this video: ${widget.name}\n${_shortUrl ?? widget.url}');
+      }
+    } catch (e) {
+      print('Error launching URL: $e');
+      // Fall back to general share on error
+      Share.share(
+          'Check out this video: ${widget.name}\n${_shortUrl ?? widget.url}');
+    }
   }
 
   // Add new method to fetch AssemblyAI transcript in selected language
@@ -450,80 +538,79 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   Row(
                     children: [
                       Expanded(
-                        child:
-                            _shortUrl != null
-                                ? Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: Colors.grey.shade300,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          _shortUrl!,
-                                          style: TextStyle(
-                                            color: Colors.grey.shade800,
-                                            fontSize: 14,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: Icon(
-                                          Icons.copy,
-                                          color: primaryColor,
-                                        ),
-                                        onPressed: _copyToClipboard,
-                                        tooltip: 'Copy Link',
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                                : Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: Colors.grey.shade300,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: primaryColor,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        'Generating share link...',
-                                        style: TextStyle(
-                                          color: Colors.grey.shade600,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
+                        child: _shortUrl != null
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
                                   ),
                                 ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        _shortUrl!,
+                                        style: TextStyle(
+                                          color: Colors.grey.shade800,
+                                          fontSize: 14,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: Icon(
+                                        Icons.copy,
+                                        color: primaryColor,
+                                      ),
+                                      onPressed: _copyToClipboard,
+                                      tooltip: 'Copy Link',
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: primaryColor,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      'Generating share link...',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                       ),
                     ],
                   ),
@@ -613,25 +700,24 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                                     color: Colors.black87,
                                     fontSize: 16,
                                   ),
-                                  items:
-                                      _languageOptions.map((lang) {
-                                        return DropdownMenuItem<String>(
-                                          value: lang['code'],
-                                          child: Row(
-                                            children: [
-                                              Icon(
-                                                Icons.language,
-                                                size: 20,
-                                                color: primaryColor.withOpacity(
-                                                  0.7,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Text(lang['name']!),
-                                            ],
+                                  items: _languageOptions.map((lang) {
+                                    return DropdownMenuItem<String>(
+                                      value: lang['code'],
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.language,
+                                            size: 20,
+                                            color: primaryColor.withOpacity(
+                                              0.7,
+                                            ),
                                           ),
-                                        );
-                                      }).toList(),
+                                          const SizedBox(width: 12),
+                                          Text(lang['name']!),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
                                   onChanged: (code) {
                                     if (code != null &&
                                         code != _selectedLanguageCode) {

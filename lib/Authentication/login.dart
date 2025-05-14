@@ -164,60 +164,82 @@ class loginState extends State<login> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      onPressed:
-                          isLoading
-                              ? null
-                              : () async {
-                                if (formKey.currentState!.validate()) {
-                                  setState(() {
-                                    isLoading = true;
-                                  });
+                      onPressed: isLoading
+                          ? null
+                          : () async {
+                              if (formKey.currentState!.validate()) {
+                                setState(() {
+                                  isLoading = true;
+                                });
 
-                                  final result = await _authService.signIn(
-                                    email: email.text.trim(),
-                                    password: password.text.trim(),
+                                final result = await _authService.signIn(
+                                  email: email.text.trim(),
+                                  password: password.text.trim(),
+                                );
+
+                                setState(() {
+                                  isLoading = false;
+                                });
+
+                                if (result != null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(result),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
                                   );
-
-                                  setState(() {
-                                    isLoading = false;
-                                  });
-
-                                  if (result == 'Login successful') {
-                                    // Navigate to welcome page
-                                    Navigator.pushReplacement(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => const WelcomeScreen(),
-                                      ),
-                                    );
-                                  } else {
-                                    // Show error or unverified message
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(result ?? 'Error'),
-                                        behavior: SnackBarBehavior.floating,
-                                      ),
-                                    );
-                                  }
                                 }
-                              },
-                      child:
-                          isLoading
-                              ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.0,
-                                ),
-                              )
-                              : const Text(
-                                "Sign In",
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
+
+                                if (result == 'Login successful') {
+                                  // Navigate to welcome page
+                                  Navigator.pushReplacement(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const WelcomeScreen(),
+                                    ),
+                                  );
+                                } else if (result != null &&
+                                    result
+                                        .contains('Please verify your email')) {
+                                  // Show a more detailed dialog for verification
+                                  showDialog(
+                                    context: context,
+                                    barrierDismissible: false,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text(
+                                          'Email Verification Required'),
+                                      content: const Text(
+                                        'Please check your email for a verification link. You must verify your email before logging in.\n\nIf you don\'t see the email, check your spam folder or request a new verification email.',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                          },
+                                          child: const Text('OK'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                      child: isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.0,
                               ),
+                            )
+                          : const Text(
+                              "Sign In",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
 
@@ -278,20 +300,19 @@ class loginState extends State<login> {
           fontWeight: FontWeight.w500,
         ),
         prefixIcon: Icon(icon, color: primaryColor),
-        suffixIcon:
-            isPassword
-                ? IconButton(
-                  onPressed: () {
-                    setState(() {
-                      isVisible = !isVisible;
-                    });
-                  },
-                  icon: Icon(
-                    isVisible ? Icons.visibility : Icons.visibility_off,
-                    color: primaryColor,
-                  ),
-                )
-                : null,
+        suffixIcon: isPassword
+            ? IconButton(
+                onPressed: () {
+                  setState(() {
+                    isVisible = !isVisible;
+                  });
+                },
+                icon: Icon(
+                  isVisible ? Icons.visibility : Icons.visibility_off,
+                  color: primaryColor,
+                ),
+              )
+            : null,
         filled: true,
         fillColor: Colors.grey[100],
         border: OutlineInputBorder(
